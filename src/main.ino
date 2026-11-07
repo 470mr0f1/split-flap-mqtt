@@ -9,7 +9,7 @@
 
 //#define SERIAL // Only define for debug, will break the I2C interface if enabled
 
-const char* FW_VERSION = "1.2.0";
+const char* FW_VERSION = "1.2.1";
 
 const int number_units = 10;
 
@@ -26,7 +26,8 @@ void setup() {
   // Enable hardware watchdog (8 seconds)
   ESP.wdtEnable(WDTO_8S);
 
-  Wire.begin(1, 3);
+  // update pins for FAE_MOD PCB
+  Wire.begin(4, 5);
   connectToWifi();
 
   // Build device ID and MQTT topics after WiFi is up (needs MAC)
