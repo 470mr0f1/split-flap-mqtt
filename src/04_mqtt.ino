@@ -155,6 +155,36 @@ void callback(String topic, byte* message, unsigned int length) {
 
     if (!error) {
       // Parse JSON payload: {"text":"HELLO","animation":"wave","speed":5}
+
+      // Check for special commands
+      const char* command = doc["command"] | "";
+
+      if (strcmp(command, "clear") == 0) {
+
+        Serial.println("Clear command received");
+
+        // Get animation parameters
+        const char* animStr = doc["animation"] | "instant";
+
+        speed = doc["speed"] | flap_speed;
+        anim = parseAnimation(animStr);
+
+        // Fill display with spaces
+        memset(flap_msg, ' ', number_units);
+        flap_msg[number_units] = '\0';
+
+        // Add clear command to message queue
+        if (enqueueMessage(flap_msg, anim, speed)) {
+          messagesProcessed++;
+          Serial.print("Display clear queued - animation: ");
+          Serial.print(animStr);
+          Serial.print(", speed: ");
+          Serial.println(speed);
+        }
+
+        return;
+      }
+
       const char* text = doc["text"] | "";
       const char* animStr = doc["animation"] | "instant";
       speed = doc["speed"] | flap_speed;
