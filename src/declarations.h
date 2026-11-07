@@ -48,6 +48,7 @@ struct QueueEntry {
   char text[11];  // number_units + 1
   AnimationType animation;
   uint8_t speed;
+  uint32_t delayMs;
 };
 
 // Function declarations - Config
@@ -76,7 +77,8 @@ void processMessageQueue();
 void build_registration();
 void checkIn();
 void publishHealth();
-bool enqueueMessage(const char* msg, AnimationType anim, uint8_t speed);
+bool enqueueTextChunks(const char* text, AnimationType anim, uint8_t speed, uint32_t delayMs);
+bool enqueueMessage(const char* msg, AnimationType anim, uint8_t speed, uint32_t delayMs);
 bool dequeueMessage(QueueEntry* entry);
 
 // Function declarations - Flaps
