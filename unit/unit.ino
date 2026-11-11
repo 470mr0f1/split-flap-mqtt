@@ -10,6 +10,7 @@
 #include <Stepper.h>
 #include <EEPROM.h>
 #include <avr/sleep.h>
+#include <Adafruit_NeoPixel.h>
 
 // Pins of I2C adress switch
 #define ADRESSSW1 6
@@ -25,6 +26,19 @@
 #define STEPS 2038 //28BYJ-48 stepper, number of steps
 #define HALLPIN 7 //Pin of hall sensor
 #define AMOUNTFLAPS 45
+
+// WS2811B LED
+#define LED_PIN 2
+#define LED_COUNT 1
+#define LED_COMMAND 0xFF
+Adafruit_NeoPixel statusLed(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
+
+// I2C receive values; LED updates are applied in loop(), not in the ISR.
+volatile uint8_t ledBrightness = 0;
+volatile uint8_t ledRed = 0;
+volatile uint8_t ledGreen = 0;
+volatile uint8_t ledBlue = 0;
+volatile bool ledUpdatePending = false;
 
 //constants others
 #define BAUDRATE 115200
@@ -86,6 +100,11 @@ void setup() {
   //hall sensor
   pinMode(HALLPIN, INPUT);
 
+  // WS2811B initialization
+  statusLed.begin();
+  statusLed.clear();
+  statusLed.show();
+
   i2cAddress = getaddress(); //get I2C Address and save in variable
 
 #ifdef SERIAL_ENABLE
@@ -139,6 +158,26 @@ void loop() {
     // turn it back on again
     Wire.begin (i2cAddress);
   }  // end of time to sleep
+
+  // Apply LED changes outside the I2C interrupt routine.
+  if (ledUpdatePending) {
+    uint8_t brightness;
+    uint8_t red;
+    uint8_t green;
+    uint8_t blue;
+
+    noInterrupts();
+    brightness = ledBrightness;
+    red = ledRed;
+    green = ledGreen;
+    blue = ledBlue;
+    ledUpdatePending = false;
+    interrupts();
+
+    statusLed.setBrightness(brightness);
+    statusLed.setPixelColor(0, statusLed.Color(red, green, blue));
+    statusLed.show();
+  }
 
   //check if new letter was received through i2c
   if (displayedLetter != receivedNumber)
@@ -248,17 +287,42 @@ void rotateToLetter(int toLetter) {
 }
 
 void receiveLetter(int numBytes) {
-  int receiveArray[4]; //array for received bytes
-  uint16_t newCalOffset = 0;
+  // LED packet: [0xFF, brightness, red, green, blue]
+  // Existing flap packets: [letter, speed] or
+  // [letter, speed, offset_low, offset_high]
 
-  for (int i = 0; i < numBytes && i < 4; i++) {
-    receiveArray[i] = Wire.read();
+  if (numBytes <= 0) return;
+
+  uint8_t data[5] = {0, 0, 0, 0, 0};
+  int count = 0;
+
+  while (Wire.available()) {
+    uint8_t value = Wire.read();
+    if (count < 5) data[count] = value;
+    count++;
   }
-  //Write received bytes to correct variables
-  receivedNumber = receiveArray[0];
-  stepperSpeed = receiveArray[1];
-  if (numBytes >= 4) {
-    newCalOffset = receiveArray[2] + (receiveArray[3] << 8);
+
+  if (data[0] == LED_COMMAND) {
+    if (count == 5) {
+      ledBrightness = data[1];
+      ledRed = data[2];
+      ledGreen = data[3];
+      ledBlue = data[4];
+      ledUpdatePending = true;
+    }
+    return;
+  }
+
+  // Legacy split-flap command.
+  if (count >= 2) {
+    receivedNumber = data[0];
+    stepperSpeed = data[1];
+  }
+
+  if (count >= 4) {
+    uint16_t newCalOffset =
+      (uint16_t)data[2] | ((uint16_t)data[3] << 8);
+
     if (newCalOffset != calOffset) {
       calOffset = newCalOffset;
       writeToEEPROM(calOffset);
