@@ -46,7 +46,7 @@ bool loadConfig() {
   configFile.readBytes(buf.get(), size);
   configFile.close();
 
-  StaticJsonDocument<512> doc;
+  JsonDocument doc;
   DeserializationError error = deserializeJson(doc, buf.get());
   if (error) {
     Serial.println("Failed to parse config file");
@@ -69,7 +69,7 @@ bool loadConfig() {
 bool saveConfig() {
   Serial.println("Saving config...");
 
-  StaticJsonDocument<512> doc;
+  JsonDocument doc;
   doc["mqtt_server"] = cfg_mqtt_server;
   doc["mqtt_port"] = cfg_mqtt_port;
   doc["mqtt_user"] = cfg_mqtt_user;
