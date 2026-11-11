@@ -174,12 +174,30 @@ uint8_t translateLettertoInt(char letterchar) {
 
 //write letter position and speed in rpm to single unit
 void writeToUnit(uint8_t address, uint8_t letter, int flapSpeed) {
-  int sendArray[2] = {letter, flapSpeed};
+  uint8_t sendArray[2] = {letter, (uint8_t)flapSpeed};
 
   Wire.beginTransmission(address);
-  for (uint8_t i = 0; i < sizeof sendArray / sizeof sendArray[0]; i++) {
-    Wire.write(sendArray[i]);
-  }
+  Wire.write(sendArray, sizeof(sendArray));
+  Wire.endTransmission();
+}
+
+// Write LED brightness and RGB color to single unit
+void writeLedToUnit(uint8_t address,
+                    uint8_t brightness,
+                    uint8_t red,
+                    uint8_t green,
+                    uint8_t blue) {
+
+  uint8_t sendArray[5] = {
+    0xFF,        // LED command
+    brightness,  // Brightness 0-255
+    red,         // Red 0-255
+    green,       // Green 0-255
+    blue         // Blue 0-255
+  };
+
+  Wire.beginTransmission(address);
+  Wire.write(sendArray, sizeof(sendArray));
   Wire.endTransmission();
 }
 
