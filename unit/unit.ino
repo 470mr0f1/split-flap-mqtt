@@ -28,7 +28,7 @@
 #define AMOUNTFLAPS 45
 
 // WS2811B LED
-#define LED_PIN 2
+#define LED_PIN A6
 #define LED_COUNT 1
 #define LED_COMMAND 0xFF
 Adafruit_NeoPixel statusLed(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
