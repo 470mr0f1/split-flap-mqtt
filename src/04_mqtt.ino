@@ -252,8 +252,6 @@ void callback(String topic, byte* message, unsigned int length) {
   Serial.print(topic);
   Serial.print(". Raw: ");
 
-
-
   // Null-terminate message for parsing
   char msgBuffer[256];
   char textToQueue[256];
@@ -269,7 +267,7 @@ void callback(String topic, byte* message, unsigned int length) {
 
   // Check if message is JSON (starts with '{')
   if (msgBuffer[0] == '{') {
-    StaticJsonDocument<256> doc;
+    JsonDocument doc;
     DeserializationError error = deserializeJson(doc, msgBuffer);
 
     if (!error) {
@@ -277,6 +275,85 @@ void callback(String topic, byte* message, unsigned int length) {
 
       // Check for special commands
       const char* command = doc["command"] | "";
+
+      // Check for LED commands
+      if (strcmp(command, "led") == 0 ||
+          strcmp(command, "led_off") == 0 ||
+          strcmp(command, "led_all") == 0 ||
+          strcmp(command, "led_off_all") == 0) {
+
+        bool allUnits =
+          (strcmp(command, "led_all") == 0 ||
+           strcmp(command, "led_off_all") == 0);
+
+        bool ledOff =
+          (strcmp(command, "led_off") == 0 ||
+           strcmp(command, "led_off_all") == 0);
+
+        uint8_t brightness = 0;
+        uint8_t red = 0;
+        uint8_t green = 0;
+        uint8_t blue = 0;
+
+        // Read color and brightness if LED should be on
+        if (!ledOff) {
+
+          brightness = constrain(
+            (int)(doc["brightness"] | 255), 0, 255);
+
+          red = constrain(
+            (int)(doc["red"] | 0), 0, 255);
+
+          green = constrain(
+            (int)(doc["green"] | 0), 0, 255);
+
+          blue = constrain(
+            (int)(doc["blue"] | 0), 0, 255);
+        }
+
+        if (allUnits) {
+
+          Serial.println("Setting LEDs on all units");
+
+          // Set LED on every Split-Flap unit
+          for (uint8_t i = 1; i <= number_units; i++) {
+
+            writeLedToUnit(
+              i,
+              brightness,
+              red,
+              green,
+              blue
+            );
+
+            Serial.print("LED updated - Unit: ");
+            Serial.println(i);
+          }
+
+        } else {
+
+          // Set LED on a single unit
+          int address = doc["address"] | -1;
+
+          if (address < 1 || address > number_units) {
+            Serial.println("Invalid I2C address");
+            return;
+          }
+
+          writeLedToUnit(
+            (uint8_t)address,
+            brightness,
+            red,
+            green,
+            blue
+          );
+
+          Serial.print("LED updated - Unit: ");
+          Serial.println(address);
+        }
+
+        return;
+      }
 
       if (strcmp(command, "clear") == 0) {
 
@@ -388,8 +465,7 @@ void processMessageQueue() {
 }
 
 void build_registration() {
-  const size_t CAPACITY = JSON_OBJECT_SIZE(7);
-  StaticJsonDocument<CAPACITY> doc;
+  JsonDocument doc;
   doc["name"] = cfg_device_name;
   doc["device_id"] = device_id;
   doc["ip_address"] = ip_char;
@@ -403,7 +479,7 @@ void checkIn() {
   unsigned long uptime = millis();
   char registration[1024];
   if (uptime - lastMillis > check_in_freq) {
-    DynamicJsonDocument doc(1024);
+    JsonDocument doc;
     deserializeJson(doc, reg);
     doc["uptime"] = uptime;
     doc["last_written"] = writtenLast;
@@ -425,7 +501,7 @@ void publishHealth() {
   }
   lastHealthPublish = now;
 
-  DynamicJsonDocument doc(512);
+  JsonDocument doc;
   doc["uptime"] = now;
   doc["messages_processed"] = messagesProcessed;
   doc["mqtt_disconnects"] = mqttDisconnects;
