@@ -92,6 +92,7 @@ void showScrollAnimation(char message[], int flapSpeed);
 void showRandomAnimation(char message[], int flapSpeed);
 uint8_t translateLettertoInt(char letterchar);
 void writeToUnit(uint8_t address, uint8_t letter, int flapSpeed);
+void writeLedToUnit(uint8_t address, uint8_t brightness, uint8_t red, uint8_t green, uint8_t blue);
 bool isDisplayMoving();
 int checkIfMoving(uint8_t address);
 uint32_t getTotalI2CErrors();
