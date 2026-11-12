@@ -16,7 +16,7 @@ const uint16_t I2C_TIMEOUT_MS = 100;
 
 // Maximum supported number of display modules.
 // Increase this value if your display has more than 32 modules.
-static const uint8_t MAX_NUMBER_UNITS = 10;
+static const uint8_t MAX_NUMBER_UNITS = number_units;
 
 // Track I2C errors per unit for health metrics.
 uint16_t i2cErrors[MAX_NUMBER_UNITS] = {0};
