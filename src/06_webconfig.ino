@@ -1,3 +1,14 @@
+#include <Arduino.h>
+#include <ESP8266WiFi.h>
+#include <ESP8266WebServer.h>
+#include <Ticker.h>
+#include <ArduinoOTA.h>
+#include <ArduinoJson.h>
+#include <Wire.h>
+#include <PubSubClient.h>
+#include <WiFiManager.h>
+#include <LittleFS.h>
+#include <ESP8266WebServer.h>
 #include "declarations.h"
 
 ESP8266WebServer webServer(80);

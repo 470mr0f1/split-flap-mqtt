@@ -1,4 +1,18 @@
+#include <Arduino.h>
+#include <ESP8266WiFi.h>
+#include <ESP8266WebServer.h>
+#include <Ticker.h>
+#include <ArduinoOTA.h>
+#include <ArduinoJson.h>
+#include <Wire.h>
+#include <PubSubClient.h>
+#include <WiFiManager.h>
+#include <LittleFS.h>
+#include <ESP8266WebServer.h>
 #include "declarations.h"
+
+WiFiClient espClient;
+PubSubClient client(espClient);
 
 const uint8_t MSG_QUEUE_SIZE = 10;
 QueueEntry messageQueue[MSG_QUEUE_SIZE];
