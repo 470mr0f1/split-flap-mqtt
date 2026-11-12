@@ -7,18 +7,12 @@
 #include <Wire.h>
 #include <PubSubClient.h>
 #include <WiFiManager.h>
-#include <FS.h>
-#include <LittleFS.h>
 #include <ESP8266WebServer.h>
-
 #include "declarations.h"
 
 //#define SERIAL // Only define for debug, will break the I2C interface if enabled
 
 const char* FW_VERSION = "1.2.1";
-
-WiFiClient espClient;
-PubSubClient client(espClient);
 
 void setup() {
   // Initialize serial for debug output
