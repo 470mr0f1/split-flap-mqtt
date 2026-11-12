@@ -16,12 +16,14 @@
 
 #pragma once
 
+#define MAX_NUMBER_UNITS 10
+
 // Version
 extern const char* FW_VERSION;
 extern const int check_in_freq;
 
 // Constants
-constexpr int number_units = 10;
+constexpr int number_units = MAX_NUMBER_UNITS;
 extern const int flapamount;
 extern const int flap_speed;
 extern const char letters[];
