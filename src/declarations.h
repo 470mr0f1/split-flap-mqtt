@@ -1,10 +1,24 @@
 #ifndef DECLARATIONS_H
 #define DECLARATIONS_H
 
+#include <Arduino.h>
+#include <ESP8266WiFi.h>
+#include <ESP8266WebServer.h>
+#include <Ticker.h>
+#include <ArduinoOTA.h>
+#include <ArduinoJson.h>
+#include <Wire.h>
+#include <PubSubClient.h>
+#include <WiFiManager.h>
+#include <LittleFS.h>
+#include <ESP8266WebServer.h>
+
+
 #pragma once
 
 // Version
 extern const char* FW_VERSION;
+extern const int check_in_freq;
 
 // Constants
 constexpr int number_units = 10;
@@ -45,7 +59,12 @@ enum AnimationType {
   ANIM_SCRAMBLE,
   ANIM_CENTER_OUT,
   ANIM_TYPEWRITER,
-  ANIM_MATRIX
+  ANIM_MATRIX,
+  ANIM_COUNTDOWN,
+  ANIM_CASCADE,
+  ANIM_SPIN,
+  ANIM_GLITCH,
+  ANIM_WIPE
 };
 
 // Queue entry structure
@@ -90,7 +109,7 @@ bool dequeueMessage(QueueEntry* entry);
 void showNewData(char message[]);
 void showNewDataAnimated(char message[], AnimationType anim, uint8_t speed);
 void showMessage(char message[], int flapSpeed);
-void showMessageAnimated(char message[], int flapSpeed, AnimationType anim);
+void showMessageAnimated(char message[number_units+1],int flapSpeed, AnimationType anim);
 void waitForDisplayIdle();
 void showWaveAnimation(char message[], int flapSpeed);
 void showScrollAnimation(char message[], int flapSpeed);
@@ -103,6 +122,12 @@ void showScrambleAnimation(char message[number_units+1], int flapSpeed);
 void showCenterOutAnimation(char message[number_units+1], int flapSpeed);
 void showTypewriterAnimation(char message[number_units+1], int flapSpeed);
 void showMatrixAnimation(char message[number_units+1], int flapSpeed);
+void showCountdownAnimation(char message[number_units+1], int flapSpeed);
+void showCascadeAnimation(char message[number_units+1], int flapSpeed);
+void showSpinAnimation(char message[number_units+1], int flapSpeed);
+void showGlitchAnimation(char message[number_units+1], int flapSpeed);
+void showWipeAnimation(char message[number_units+1], int flapSpeed);
+
 uint8_t translateLettertoInt(char letterchar);
 void writeToUnit(uint8_t address, uint8_t letter, int flapSpeed);
 void writeLedToUnit(uint8_t address, uint8_t brightness, uint8_t red, uint8_t green, uint8_t blue);

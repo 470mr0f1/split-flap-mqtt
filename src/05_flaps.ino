@@ -1,10 +1,25 @@
+#include <Arduino.h>
+#include <ESP8266WiFi.h>
+#include <ESP8266WebServer.h>
+#include <Ticker.h>
+#include <ArduinoOTA.h>
+#include <ArduinoJson.h>
+#include <Wire.h>
+#include <PubSubClient.h>
+#include <WiFiManager.h>
+#include <LittleFS.h>
+#include <ESP8266WebServer.h>
 #include "declarations.h"
 
 const uint8_t I2C_MAX_RETRIES = 3;
 const uint16_t I2C_TIMEOUT_MS = 100;
 
-// Track I2C errors per unit for health metrics
-uint16_t i2cErrors[number_units] = {0};
+// Maximum supported number of display modules.
+// Increase this value if your display has more than 32 modules.
+static const uint8_t MAX_NUMBER_UNITS = 10;
+
+// Track I2C errors per unit for health metrics.
+uint16_t i2cErrors[MAX_NUMBER_UNITS] = {0};
 
 //checks for new message to show (legacy, instant animation)
 void showNewData(char message[number_units+1]) {
@@ -37,6 +52,12 @@ void showMessage(char message[number_units+1], int flapSpeed) {
 
 // Show message with animation
 void showMessageAnimated(char message[number_units+1], int flapSpeed, AnimationType anim) {
+  if (number_units > MAX_NUMBER_UNITS) {
+    Serial.println("Animation aborted: number_units exceeds MAX_NUMBER_UNITS");
+    return;
+  }
+
+  initializeAnimationRandom();
   waitForDisplayIdle();
 
   switch (anim) {
@@ -71,6 +92,26 @@ void showMessageAnimated(char message[number_units+1], int flapSpeed, AnimationT
     case ANIM_MATRIX:
       showMatrixAnimation(message, flapSpeed);
       break;
+
+     case ANIM_COUNTDOWN:
+       showCountdownAnimation(message, flapSpeed);
+       break;
+
+     case ANIM_CASCADE:
+       showCascadeAnimation(message, flapSpeed);
+       break;
+
+     case ANIM_SPIN:
+       showSpinAnimation(message, flapSpeed);
+       break;
+
+     case ANIM_GLITCH:
+       showGlitchAnimation(message, flapSpeed);
+       break;
+
+     case ANIM_WIPE:
+       showWipeAnimation(message, flapSpeed);
+       break;
 
     case ANIM_INSTANT:
     default:
@@ -139,7 +180,7 @@ void showWaveAnimation(char message[number_units+1], int flapSpeed) {
 // Scroll animation: characters appear from right, scroll left
 void showScrollAnimation(char message[number_units+1], int flapSpeed) {
   Serial.println("start to send (scroll)");
-  char tempMsg[number_units + 1];
+  char tempMsg[MAX_NUMBER_UNITS + 1];
 
   // Start with all spaces
   for (int i = 0; i < number_units; i++) {
@@ -175,7 +216,7 @@ void showRandomAnimation(char message[number_units+1], int flapSpeed) {
   Serial.println("start to send (random)");
 
   // Track which units have been revealed
-  bool revealed[number_units] = {false};
+  bool revealed[MAX_NUMBER_UNITS] = {false};
   int remaining = number_units;
 
   // First, set all to space
@@ -219,7 +260,7 @@ void showSlotMachineAnimation(char message[number_units+1], int flapSpeed) {
 
   initializeAnimationRandom();
 
-  uint8_t target[number_units];
+  uint8_t target[MAX_NUMBER_UNITS];
 
   // Determine target positions
   for (int i = 0; i < number_units; i++) {
@@ -257,8 +298,8 @@ void showScrambleAnimation(char message[number_units+1], int flapSpeed) {
 
   initializeAnimationRandom();
 
-  uint8_t target[number_units];
-  bool settled[number_units] = {false};
+  uint8_t target[MAX_NUMBER_UNITS];
+  bool settled[MAX_NUMBER_UNITS] = {false};
 
   // Determine target positions
   for (int i = 0; i < number_units; i++) {
@@ -375,7 +416,7 @@ void showMatrixAnimation(char message[number_units+1], int flapSpeed) {
 
   initializeAnimationRandom();
 
-  uint8_t target[number_units];
+  uint8_t target[MAX_NUMBER_UNITS];
 
   // Determine target positions
   for (int i = 0; i < number_units; i++) {
@@ -409,6 +450,133 @@ void showMatrixAnimation(char message[number_units+1], int flapSpeed) {
     waitForDisplayIdle();
 
     delay(80);
+    ESP.wdtFeed();
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Additional animations
+// -----------------------------------------------------------------------------
+
+// Countdown: all modules cycle through random characters. The pauses become
+// progressively longer, then the final message is revealed from left to right.
+void showCountdownAnimation(char message[number_units+1], int flapSpeed) {
+  Serial.println("start to send (countdown)");
+
+  const uint8_t rounds = 10;
+
+  for (uint8_t round = 0; round < rounds; round++) {
+    for (int i = 0; i < number_units; i++) {
+      uint8_t position = random(0, flapamount);
+      writeToUnit(i, position, flapSpeed);
+    }
+
+    waitForDisplayIdle();
+    delay(20 + round * 25);
+    ESP.wdtFeed();
+  }
+
+  for (int i = 0; i < number_units; i++) {
+    writeToUnit(i, getMessagePosition(message[i]), flapSpeed);
+    waitForDisplayIdle();
+    delay(80);
+    ESP.wdtFeed();
+  }
+}
+
+// Cascade: each module rapidly changes through random characters and then
+// settles on its target before the next module starts.
+void showCascadeAnimation(char message[number_units+1], int flapSpeed) {
+  Serial.println("start to send (cascade)");
+
+  const uint8_t rounds = 6;
+
+  for (int i = 0; i < number_units; i++) {
+    for (uint8_t round = 0; round < rounds; round++) {
+      writeToUnit(i, random(0, flapamount), flapSpeed);
+      waitForDisplayIdle();
+      delay(35);
+      ESP.wdtFeed();
+    }
+
+    writeToUnit(i, getMessagePosition(message[i]), flapSpeed);
+    waitForDisplayIdle();
+    delay(60);
+  }
+}
+
+// Spin: modules cycle through the available flap positions. A per-module
+// offset gives the display a more lively effect. Modules then stop in order.
+void showSpinAnimation(char message[number_units+1], int flapSpeed) {
+  Serial.println("start to send (spin)");
+
+  if (flapamount == 0) return;
+
+  const uint8_t rotations = 2;
+  const uint16_t totalSteps = (uint16_t)flapamount * rotations;
+
+  for (uint16_t step = 0; step < totalSteps; step++) {
+    for (int i = 0; i < number_units; i++) {
+      uint8_t position = (step + (i * 3)) % flapamount;
+      writeToUnit(i, position, flapSpeed);
+    }
+
+    waitForDisplayIdle();
+    delay(15);
+    ESP.wdtFeed();
+  }
+
+  for (int i = 0; i < number_units; i++) {
+    writeToUnit(i, getMessagePosition(message[i]), flapSpeed);
+    waitForDisplayIdle();
+    delay(100);
+    ESP.wdtFeed();
+  }
+}
+
+// Glitch: randomly selected modules jump to random characters. The final
+// target text is sent to all modules together.
+void showGlitchAnimation(char message[number_units+1], int flapSpeed) {
+  Serial.println("start to send (glitch)");
+
+  const uint8_t rounds = 15;
+
+  for (uint8_t round = 0; round < rounds; round++) {
+    for (int i = 0; i < number_units; i++) {
+      if (random(0, 100) < 55) {
+        writeToUnit(i, random(0, flapamount), flapSpeed);
+      }
+    }
+
+    waitForDisplayIdle();
+    delay(random(20, 80));
+    ESP.wdtFeed();
+  }
+
+  for (int i = 0; i < number_units; i++) {
+    writeToUnit(i, getMessagePosition(message[i]), flapSpeed);
+  }
+
+  waitForDisplayIdle();
+}
+
+// Wipe: clear the complete display, then write the new message from left to right.
+void showWipeAnimation(char message[number_units+1], int flapSpeed) {
+  Serial.println("start to send (wipe)");
+
+  const uint8_t blankPosition = translateLettertoInt(' ');
+
+  for (int i = 0; i < number_units; i++) {
+    writeToUnit(i, blankPosition, flapSpeed);
+  }
+
+  waitForDisplayIdle();
+  delay(150);
+
+  for (int i = 0; i < number_units; i++) {
+    writeToUnit(i, getMessagePosition(message[i]), flapSpeed);
+    waitForDisplayIdle();
+    delay(70);
     ESP.wdtFeed();
   }
 }
@@ -492,7 +660,7 @@ int checkIfMoving(uint8_t address) {
     delay(5);
   }
 
-  if (address < number_units) {
+  if (address < number_units && address < MAX_NUMBER_UNITS) {
     i2cErrors[address]++;
   }
   return 0;
@@ -501,7 +669,7 @@ int checkIfMoving(uint8_t address) {
 // Get total I2C errors for health reporting
 uint32_t getTotalI2CErrors() {
   uint32_t total = 0;
-  for (int i = 0; i < number_units; i++) {
+  for (int i = 0; i < number_units && i < MAX_NUMBER_UNITS; i++) {
     total += i2cErrors[i];
   }
   return total;
