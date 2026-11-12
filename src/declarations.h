@@ -1,13 +1,13 @@
 #ifndef DECLARATIONS_H
 #define DECLARATIONS_H
 
-#include <Arduino.h>
+#pragma once
 
 // Version
 extern const char* FW_VERSION;
 
 // Constants
-extern const int number_units;
+constexpr int number_units = 10;
 extern const int flapamount;
 extern const int flap_speed;
 extern const char letters[];
@@ -40,7 +40,12 @@ enum AnimationType {
   ANIM_INSTANT = 0,
   ANIM_WAVE,
   ANIM_SCROLL,
-  ANIM_RANDOM
+  ANIM_RANDOM,
+  ANIM_SLOT_MACHINE,
+  ANIM_SCRAMBLE,
+  ANIM_CENTER_OUT,
+  ANIM_TYPEWRITER,
+  ANIM_MATRIX
 };
 
 // Queue entry structure
@@ -90,6 +95,14 @@ void waitForDisplayIdle();
 void showWaveAnimation(char message[], int flapSpeed);
 void showScrollAnimation(char message[], int flapSpeed);
 void showRandomAnimation(char message[], int flapSpeed);
+void initializeAnimationRandom();
+uint8_t getRandomFlapPosition(uint8_t excludedPosition);
+uint8_t getMessagePosition(char character);
+void showSlotMachineAnimation(char message[number_units+1], int flapSpeed);
+void showScrambleAnimation(char message[number_units+1], int flapSpeed);
+void showCenterOutAnimation(char message[number_units+1], int flapSpeed);
+void showTypewriterAnimation(char message[number_units+1], int flapSpeed);
+void showMatrixAnimation(char message[number_units+1], int flapSpeed);
 uint8_t translateLettertoInt(char letterchar);
 void writeToUnit(uint8_t address, uint8_t letter, int flapSpeed);
 void writeLedToUnit(uint8_t address, uint8_t brightness, uint8_t red, uint8_t green, uint8_t blue);
