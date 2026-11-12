@@ -1,7 +1,5 @@
 #include "declarations.h"
-#include <WiFiManager.h>
-#include <FS.h>
-#include <LittleFS.h>
+
 
 // Config file path
 const char* CONFIG_FILE = "/config.json";
