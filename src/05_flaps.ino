@@ -43,17 +43,71 @@ void showMessageAnimated(char message[number_units+1], int flapSpeed, AnimationT
     case ANIM_WAVE:
       showWaveAnimation(message, flapSpeed);
       break;
+
     case ANIM_SCROLL:
       showScrollAnimation(message, flapSpeed);
       break;
+
     case ANIM_RANDOM:
       showRandomAnimation(message, flapSpeed);
       break;
+
+    case ANIM_SLOT_MACHINE:
+      showSlotMachineAnimation(message, flapSpeed);
+      break;
+
+    case ANIM_SCRAMBLE:
+      showScrambleAnimation(message, flapSpeed);
+      break;
+
+    case ANIM_CENTER_OUT:
+      showCenterOutAnimation(message, flapSpeed);
+      break;
+
+    case ANIM_TYPEWRITER:
+      showTypewriterAnimation(message, flapSpeed);
+      break;
+
+    case ANIM_MATRIX:
+      showMatrixAnimation(message, flapSpeed);
+      break;
+
     case ANIM_INSTANT:
     default:
       showMessage(message, flapSpeed);
       break;
   }
+}
+
+// Initialize random generator only once
+void initializeAnimationRandom() {
+  static bool initialized = false;
+
+  if (!initialized) {
+    randomSeed(micros());
+    initialized = true;
+  }
+}
+
+// Return a random flap position, optionally excluding one position
+uint8_t getRandomFlapPosition(uint8_t excludedPosition) {
+  if (flapamount <= 1) {
+    return 0;
+  }
+
+  // Select from all positions except the excluded one
+  uint8_t position = random(0, flapamount - 1);
+
+  if (position >= excludedPosition) {
+    position++;
+  }
+
+  return position;
+}
+
+// Convert message character to flap position
+uint8_t getMessagePosition(char character) {
+  return translateLettertoInt(toupper(character));
 }
 
 // Wait for display to be idle with timeout
@@ -157,6 +211,205 @@ void showRandomAnimation(char message[number_units+1], int flapSpeed) {
       delay(150);
       ESP.wdtFeed();
     }
+  }
+}
+
+void showSlotMachineAnimation(char message[number_units+1], int flapSpeed) {
+  Serial.println("start to send (slot machine)");
+
+  initializeAnimationRandom();
+
+  uint8_t target[number_units];
+
+  // Determine target positions
+  for (int i = 0; i < number_units; i++) {
+    target[i] = getMessagePosition(message[i]);
+  }
+
+  // Random spinning phase
+  const uint8_t rounds = 10;
+
+  for (uint8_t round = 0; round < rounds; round++) {
+
+    for (int i = 0; i < number_units; i++) {
+      uint8_t randomPosition = getRandomFlapPosition(target[i]);
+      writeToUnit(i, randomPosition, flapSpeed);
+    }
+
+    waitForDisplayIdle();
+    delay(50);
+    ESP.wdtFeed();
+  }
+
+  // Stop modules one after another, from left to right
+  for (int i = 0; i < number_units; i++) {
+    writeToUnit(i, target[i], flapSpeed);
+
+    waitForDisplayIdle();
+
+    delay(100);
+    ESP.wdtFeed();
+  }
+}
+
+void showScrambleAnimation(char message[number_units+1], int flapSpeed) {
+  Serial.println("start to send (scramble)");
+
+  initializeAnimationRandom();
+
+  uint8_t target[number_units];
+  bool settled[number_units] = {false};
+
+  // Determine target positions
+  for (int i = 0; i < number_units; i++) {
+    target[i] = getMessagePosition(message[i]);
+  }
+
+  // Randomize all modules repeatedly
+  const uint8_t rounds = 8;
+
+  for (uint8_t round = 0; round < rounds; round++) {
+
+    for (int i = 0; i < number_units; i++) {
+      uint8_t randomPosition = getRandomFlapPosition(target[i]);
+      writeToUnit(i, randomPosition, flapSpeed);
+    }
+
+    waitForDisplayIdle();
+
+    delay(80);
+    ESP.wdtFeed();
+  }
+
+  // Reveal target characters in random order
+  int remaining = number_units;
+
+  while (remaining > 0) {
+
+    int pick = random(remaining);
+    int unitIdx = -1;
+    int count = 0;
+
+    for (int i = 0; i < number_units; i++) {
+      if (!settled[i]) {
+        if (count == pick) {
+          unitIdx = i;
+          break;
+        }
+        count++;
+      }
+    }
+
+    if (unitIdx >= 0) {
+      writeToUnit(unitIdx, target[unitIdx], flapSpeed);
+
+      waitForDisplayIdle();
+
+      settled[unitIdx] = true;
+      remaining--;
+
+      delay(100);
+      ESP.wdtFeed();
+    }
+  }
+}
+
+void showCenterOutAnimation(char message[number_units+1], int flapSpeed) {
+  Serial.println("start to send (center out)");
+
+  int left = (number_units - 1) / 2;
+  int right = number_units / 2;
+
+  // Start in the center and expand outwards
+  while (left >= 0 || right < number_units) {
+
+    if (left == right) {
+      // Odd number of modules: exactly one center module
+      uint8_t position = getMessagePosition(message[left]);
+      writeToUnit(left, position, flapSpeed);
+
+      left--;
+      right++;
+    }
+    else {
+      // Even number of modules or outer positions
+      if (left >= 0) {
+        uint8_t position = getMessagePosition(message[left]);
+        writeToUnit(left, position, flapSpeed);
+        left--;
+      }
+
+      if (right < number_units) {
+        uint8_t position = getMessagePosition(message[right]);
+        writeToUnit(right, position, flapSpeed);
+        right++;
+      }
+    }
+
+    delay(120);
+    ESP.wdtFeed();
+  }
+
+  waitForDisplayIdle();
+}
+
+void showTypewriterAnimation(char message[number_units+1], int flapSpeed) {
+  Serial.println("start to send (typewriter)");
+
+  for (int i = 0; i < number_units; i++) {
+
+    uint8_t position = getMessagePosition(message[i]);
+
+    writeToUnit(i, position, flapSpeed);
+
+    // Wait until the current character has finished moving
+    waitForDisplayIdle();
+
+    delay(120);
+    ESP.wdtFeed();
+  }
+}
+
+void showMatrixAnimation(char message[number_units+1], int flapSpeed) {
+  Serial.println("start to send (matrix)");
+
+  initializeAnimationRandom();
+
+  uint8_t target[number_units];
+
+  // Determine target positions
+  for (int i = 0; i < number_units; i++) {
+    target[i] = getMessagePosition(message[i]);
+  }
+
+  // Matrix effect: random characters on all modules
+  const uint8_t rounds = 12;
+
+  for (uint8_t round = 0; round < rounds; round++) {
+
+    for (int i = 0; i < number_units; i++) {
+      uint8_t randomPosition = random(0, flapamount);
+      writeToUnit(i, randomPosition, flapSpeed);
+
+      // Slight delay between modules creates a flowing effect
+      delay(25);
+    }
+
+    waitForDisplayIdle();
+
+    delay(40);
+    ESP.wdtFeed();
+  }
+
+  // Resolve the message from left to right
+  for (int i = 0; i < number_units; i++) {
+
+    writeToUnit(i, target[i], flapSpeed);
+
+    waitForDisplayIdle();
+
+    delay(80);
+    ESP.wdtFeed();
   }
 }
 
