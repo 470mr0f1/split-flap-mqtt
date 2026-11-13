@@ -101,6 +101,8 @@ void callback(String topic, byte* message, unsigned int length);
 void mqttLoopOps();
 void processMessageQueue();
 void build_registration();
+void centerPadMessage(const char* input, int inputLen, char* output);
+AnimationType parseAnimation(const char* anim);
 void checkIn();
 void publishHealth();
 bool enqueueTextChunks(const char* text, AnimationType anim, uint8_t speed, uint32_t delayMs);
