@@ -472,6 +472,8 @@ void processMessageQueue() {
     if (!isDisplayMoving()) {
       messageInProgress = false;
       nextMessageAllowedAt = millis() + currentDelayMs;
+      // isDisplayMoving() just polled every unit: check for status 2 (homing failed)
+      evaluateUnitFaults();
     }
     return;
   }
@@ -532,8 +534,12 @@ void publishHealth() {
   static unsigned long lastHealthPublish = 0;
   unsigned long now = millis();
 
-  // Publish every 30 seconds
-  if (now - lastHealthPublish < 30000) {
+  // Periodic unit status check (status 2 = homing failed)
+  pollUnitFaults();
+  bool faultsChanged = consumeFaultChange();
+
+  // Publish every 30 seconds, and immediately when a unit fault appears or clears
+  if (!faultsChanged && now - lastHealthPublish < 30000) {
     return;
   }
   lastHealthPublish = now;
@@ -543,11 +549,23 @@ void publishHealth() {
   doc["messages_processed"] = messagesProcessed;
   doc["mqtt_disconnects"] = mqttDisconnects;
   doc["i2c_errors"] = getTotalI2CErrors();
+  doc["calibration_faults"] = getCalibrationFaultEvents();
+
+  // Display positions (0 = leftmost) whose unit currently reports a failed homing
+  JsonArray faultyUnits = doc["faulty_units"].to<JsonArray>();
+  uint16_t faultMask = getUnitFaultMask();
+  for (int i = 0; i < number_units; i++) {
+    if (faultMask & (1u << i)) {
+      faultyUnits.add(i);
+    }
+  }
   doc["queue_depth"] = queueCount;
   doc["wifi_rssi"] = WiFi.RSSI();
   doc["free_heap"] = ESP.getFreeHeap();
 
   char healthJson[512];
   serializeJson(doc, healthJson);
-  client.publish(mqtt_health, healthJson);
+  if (!client.publish(mqtt_health, healthJson)) {
+    Serial.println("Health publish failed (not connected or too large)");
+  }
 }
