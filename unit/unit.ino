@@ -145,10 +145,12 @@ void setup() {
 
 void loop() {
   unsigned long currentMillis = millis();
-  // Do not sleep while a move/LED/EEPROM update is still pending
+  // Do not sleep while a move/LED/EEPROM update is still pending. Also stay awake
+  // after a failed homing: millis() stops in power-down, so the retry pause
+  // (CAL_RETRY_TIMEOUT) would otherwise not elapse in real time.
   if (currentMillis - previousMillis >= WAIT_TIME &&
       displayedLetter == receivedNumber &&
-      !ledUpdatePending && !offsetWritePending) {
+      !ledUpdatePending && !offsetWritePending && !calibrationFailed) {
     byte old_ADCSRA = ADCSRA;
     // disable ADC
     ADCSRA = 0;
