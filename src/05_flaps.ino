@@ -28,7 +28,9 @@ void showNewData(char message[number_units+1]) {
 
 // Show new data with animation support
 void showNewDataAnimated(char message[number_units+1], AnimationType anim, uint8_t speed) {
-  if (strcmp(writtenLast, message) != 0) {
+  // While a unit reports a failed homing it dropped its last request, so the
+  // same text must be sendable again (acts as a retry).
+  if (strcmp(writtenLast, message) != 0 || getUnitFaultMask() != 0) {
     strncpy(writtenLast, message, number_units);
     writtenLast[number_units] = '\0';
     showMessageAnimated(message, speed, anim);
