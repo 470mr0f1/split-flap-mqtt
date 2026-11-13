@@ -139,4 +139,16 @@ bool isDisplayMoving();
 int checkIfMoving(uint8_t address);
 uint32_t getTotalI2CErrors();
 
+// Status byte reported by a unit on I2C read (unit firmware requestEvent())
+constexpr uint8_t UNIT_STATUS_IDLE  = 0;
+constexpr uint8_t UNIT_STATUS_BUSY  = 1;  // rotating, or a move is still pending
+constexpr uint8_t UNIT_STATUS_FAULT = 2;  // homing / calibration failed
+
+// Function declarations - Unit faults
+void pollUnitFaults();
+void evaluateUnitFaults();
+uint16_t getUnitFaultMask();
+bool consumeFaultChange();
+uint32_t getCalibrationFaultEvents();
+
 #endif
