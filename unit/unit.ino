@@ -28,7 +28,9 @@
 #define AMOUNTFLAPS 45
 
 // WS2811B LED
-#define LED_PIN A6
+// NOTE: A6/A7 of the Nano are analog-input only (no digital output), so the
+// NeoPixel data line must be on a digital-capable pin. D12 is free here.
+#define LED_PIN 2
 #define LED_COUNT 1
 #define LED_COMMAND 0xFF
 Adafruit_NeoPixel statusLed(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
@@ -40,9 +42,16 @@ volatile uint8_t ledGreen = 0;
 volatile uint8_t ledBlue = 0;
 volatile bool ledUpdatePending = false;
 
+// Calibration offset received via I2C; EEPROM is written in loop(), not in the ISR.
+volatile uint16_t pendingCalOffset = 0;
+volatile bool offsetWritePending = false;
+
 //constants others
 #define BAUDRATE 115200
 #define ROTATIONDIRECTION -1 //-1 for reverse direction
+#define MIN_STEPPER_SPEED 1  //rpm limits for speed values received via I2C (0 would divide by zero in Stepper, >~15 skips steps)
+#define MAX_STEPPER_SPEED 12
+#define CAL_RETRY_TIMEOUT 60 //seconds to wait before homing is retried after a failed calibration
 #define OVERHEATINGTIMEOUT 2 //timeout in seconds to avoid overheating of stepper. After starting rotation, the counter will start. Stepper won't move again until timeout is passed
 unsigned long lastRotation = 0;
 
@@ -54,7 +63,7 @@ boolean newData = false;
 #endif
 
 //globals
-int displayedLetter = 0; //currently shown letter
+volatile uint8_t displayedLetter = 0; //currently shown letter
 int desiredLetter = 0; //letter to be shown
 const char letters[] = {' ', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', 'Ä', 'Ö', 'Ü', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', ':', '.', '-', '?', '!'};
 Stepper stepper(STEPS, STEPPERPIN1, STEPPERPIN3, STEPPERPIN2, STEPPERPIN4); //stepper setup
@@ -62,12 +71,13 @@ bool lastInd1 = false; //store last status of phase
 bool lastInd2 = false; //store last status of phase
 bool lastInd3 = false; //store last status of phase
 bool lastInd4 = false; //store last status of phase
-float missedSteps = 0; //cummulate steps <1, to compensate via additional step when reaching >1
-int currentlyrotating = 0; // 1 = drum is currently rotating, 0 = drum is standing still
-int stepperSpeed = 10; //current speed of stepper, value only for first homing
+volatile uint8_t currentlyrotating = 0; // 1 = drum is currently rotating, 0 = drum is standing still
+volatile bool calibrationFailed = false; // set when homing failed, reported to the master as status 2
+unsigned long calibrationFailedAt = 0;
+volatile uint8_t stepperSpeed = 10; //current speed of stepper, value only for first homing
 int eeAddress = 0;   //EEPROM address for calibration offset
 uint16_t calOffset;       //Offset for calibration in steps, stored in EEPROM, gets read in setup
-int receivedNumber = 0;
+volatile uint8_t receivedNumber = 0;
 int i2cAddress;
 
 //sleep globals
@@ -100,6 +110,10 @@ void setup() {
   //hall sensor
   pinMode(HALLPIN, INPUT);
 
+#ifndef SERIAL_ENABLE
+  pinMode(LED_BUILTIN, OUTPUT); // used as sleep/wake indicator in loop()
+#endif
+
   // WS2811B initialization
   statusLed.begin();
   statusLed.clear();
@@ -131,7 +145,10 @@ void setup() {
 
 void loop() {
   unsigned long currentMillis = millis();
-  if (currentMillis - previousMillis >= WAIT_TIME) {
+  // Do not sleep while a move/LED/EEPROM update is still pending
+  if (currentMillis - previousMillis >= WAIT_TIME &&
+      displayedLetter == receivedNumber &&
+      !ledUpdatePending && !offsetWritePending) {
     byte old_ADCSRA = ADCSRA;
     // disable ADC
     ADCSRA = 0;
@@ -179,6 +196,21 @@ void loop() {
     statusLed.show();
   }
 
+  // Store a new calibration offset (slow EEPROM write, must not run in the ISR).
+  if (offsetWritePending) {
+    uint16_t newOffset;
+
+    noInterrupts();
+    newOffset = pendingCalOffset;
+    offsetWritePending = false;
+    interrupts();
+
+    if (newOffset != calOffset) {
+      calOffset = newOffset;
+      writeToEEPROM(calOffset);
+    }
+  }
+
   //check if new letter was received through i2c
   if (displayedLetter != receivedNumber)
   {
@@ -215,16 +247,34 @@ int translateLettertoInt(char letterchar) {
   return -1;
 }
 
+// Absolute step position of a flap (integer math, rounded). Using absolute
+// positions makes every flap always end at the same step count, independent
+// of the path taken, and needs no float / accumulated remainder.
+static int16_t flapToSteps(uint8_t flap) {
+  return (int16_t)(((int32_t)flap * STEPS + AMOUNTFLAPS / 2) / AMOUNTFLAPS);
+}
+
 //rotate to letter
 void rotateToLetter(int toLetter) {
   if (lastRotation == 0 || (millis() - lastRotation > OVERHEATINGTIMEOUT * 1000)) {
     lastRotation = millis();
+
+    // After a failed homing the position is unknown. Drop requests (so the main
+    // loop does not retry endlessly and overheat the stepper) and retry homing
+    // only after a longer pause.
+    if (calibrationFailed) {
+      if (millis() - calibrationFailedAt < CAL_RETRY_TIMEOUT * 1000UL ||
+          calibrate(true) < 0) {
+        receivedNumber = displayedLetter;
+        return;
+      }
+    }
+
     //get letter position
     int posLetter = -1;
     posLetter = toLetter;
     int posCurrentLetter = -1;
     posCurrentLetter = displayedLetter;
-    //int amountLetters = sizeof(letters) / sizeof(String);
 #ifdef SERIAL_ENABLE
     Serial.print(F("go to letter: "));
     Serial.println(letters[toLetter]);
@@ -236,40 +286,23 @@ void rotateToLetter(int toLetter) {
 #ifdef SERIAL_ENABLE
         Serial.println("direct");
 #endif
-        //go directly to next letter, get steps from current letter to target letter
-        int diffPosition = posLetter - posCurrentLetter;
+        //go directly to next letter
         startMotor();
         stepper.setSpeed(stepperSpeed);
-        //doing the rotation letterwise
-        for (int i = 0; i < diffPosition; i++) {
-          float preciseStep = (float)STEPS / (float)AMOUNTFLAPS;
-          int roundedStep = (int)preciseStep;
-          missedSteps = missedSteps + ((float)preciseStep - (float)roundedStep);
-          if (missedSteps > 1) {
-            roundedStep = roundedStep + 1;
-            missedSteps--;
-          }
-          stepper.step(ROTATIONDIRECTION * roundedStep);
-        }
+        stepper.step(ROTATIONDIRECTION * (flapToSteps(posLetter) - flapToSteps(posCurrentLetter)));
       }
       else {
         //full rotation is needed, good time for a calibration
 #ifdef SERIAL_ENABLE
         Serial.println(F("full rotation incl. calibration"));
 #endif
-        calibrate(false); //calibrate revolver and do not stop motor
-        //startMotor();
-        stepper.setSpeed(stepperSpeed);
-        for (int i = 0; i < posLetter; i++) {
-          float preciseStep = (float)STEPS / (float)AMOUNTFLAPS;
-          int roundedStep = (int)preciseStep;
-          missedSteps = missedSteps + (float)preciseStep - (float)roundedStep;
-          if (missedSteps > 1) {
-            roundedStep = roundedStep + 1;
-            missedSteps--;
-          }
-          stepper.step(ROTATIONDIRECTION * roundedStep);
+        if (calibrate(false) < 0) { //calibrate revolver and do not stop motor
+          // homing failed: motor is already stopped, abort instead of moving blind
+          receivedNumber = displayedLetter;
+          return;
         }
+        stepper.setSpeed(stepperSpeed);
+        stepper.step(ROTATIONDIRECTION * flapToSteps(posLetter));
       }
       //store new position
       displayedLetter = toLetter;
@@ -314,24 +347,34 @@ void receiveLetter(int numBytes) {
   }
 
   // Legacy split-flap command.
-  if (count >= 2) {
+  // Ignore invalid flap indices (would lose the drum position) and clamp speed.
+  if (count >= 2 && data[0] < AMOUNTFLAPS) {
     receivedNumber = data[0];
-    stepperSpeed = data[1];
+    stepperSpeed = constrain(data[1], MIN_STEPPER_SPEED, MAX_STEPPER_SPEED);
   }
 
   if (count >= 4) {
     uint16_t newCalOffset =
       (uint16_t)data[2] | ((uint16_t)data[3] << 8);
 
-    if (newCalOffset != calOffset) {
-      calOffset = newCalOffset;
-      writeToEEPROM(calOffset);
+    // EEPROM write is done in loop(): it takes ms and must not block the ISR.
+    if (newCalOffset <= STEPS) {
+      pendingCalOffset = newCalOffset;
+      offsetWritePending = true;
     }
   }
 }
 
 void requestEvent() {
-  Wire.write(currentlyrotating); //send unit status to master
+  // 1 = rotating or a move is still pending (e.g. waiting for the overheating
+  // timeout), 2 = last homing failed, 0 = idle. Masters checking "== 1" stay compatible.
+  uint8_t status = 0;
+  if (currentlyrotating || displayedLetter != receivedNumber) {
+    status = 1;
+  } else if (calibrationFailed) {
+    status = 2;
+  }
+  Wire.write(status); //send unit status to master
   /*
     #ifdef SERIAL_ENABLE
     Serial.print("Status ");
@@ -351,7 +394,7 @@ int getaddress() {
 //gets magnet sensor offset from EEPROM in steps
 void getOffset() {
   EEPROM.get(eeAddress, calOffset);
-  if (calOffset < 0) {
+  if (calOffset > STEPS) { // blank EEPROM reads 0xFFFF; (calOffset < 0) never triggers on unsigned
     calOffset = 0;
   }
 #ifdef SERIAL_ENABLE
@@ -386,7 +429,7 @@ int calibrate(bool initialCalibration) {
       reachedMarker = true;
       stepper.step(ROTATIONDIRECTION * calOffset);
       displayedLetter = 0;
-      missedSteps = 0;
+      calibrationFailed = false;
 #ifdef SERIAL_ENABLE
       Serial.println(F("revolver calibrated"));
 #endif
@@ -400,6 +443,8 @@ int calibrate(bool initialCalibration) {
       //seems that there is a problem with the marker or the sensor. turn of the motor to avoid overheating.
       displayedLetter = 0;
       desiredLetter = 0;
+      calibrationFailed = true;
+      calibrationFailedAt = millis();
       reachedMarker = true;
 #ifdef SERIAL_ENABLE
       Serial.println(F("calibration revolver failed"));
@@ -448,7 +493,7 @@ void writeToEEPROM(uint16_t offsetValue) {
 
 #ifdef SERIAL_ENABLE
   Serial.print(F("Value written to EEPROM: "));
-  Serial.print(calOffset);
+  Serial.print(offsetValue);
   Serial.println();
 #endif
 }
