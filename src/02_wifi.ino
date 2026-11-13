@@ -51,15 +51,14 @@ bool loadConfig() {
     return false;
   }
 
-  size_t size = configFile.size();
-  std::unique_ptr<char[]> buf(new char[size]);
-  configFile.readBytes(buf.get(), size);
-  configFile.close();
-
+  // Parse directly from the stream: no manual buffer, so no missing
+  // NUL terminator / out-of-bounds read.
   JsonDocument doc;
-  DeserializationError error = deserializeJson(doc, buf.get());
+  DeserializationError error = deserializeJson(doc, configFile);
+  configFile.close();
   if (error) {
-    Serial.println("Failed to parse config file");
+    Serial.print("Failed to parse config file: ");
+    Serial.println(error.c_str());
     return false;
   }
 
