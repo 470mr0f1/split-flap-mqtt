@@ -353,7 +353,7 @@ void callback(String topic, byte* message, unsigned int length) {
           Serial.println("Setting LEDs on all units");
 
           // Set LED on every Split-Flap unit
-          for (uint8_t i = 1; i <= number_units; i++) {
+          for (uint8_t i = 0; i < number_units; i++) {
 
             writeLedToUnit(
               i,
