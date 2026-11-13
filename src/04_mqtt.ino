@@ -20,6 +20,9 @@ uint8_t queueHead = 0;
 uint8_t queueTail = 0;
 uint8_t queueCount = 0;
 
+// PubSubClient packet buffer (topic + payload + header)
+const uint16_t MQTT_BUFFER_SIZE = 512;
+
 // Current animation state
 AnimationType currentAnimation = ANIM_INSTANT;
 uint8_t currentSpeed = 10;
@@ -40,6 +43,12 @@ void mqttSetup() {
 
   client.setServer(cfg_mqtt_server, port);
   client.setCallback(callback);
+
+  // PubSubClient default is 256 bytes for topic + payload. Larger publishes
+  // (registration JSON) and incoming messages are otherwise dropped silently.
+  if (!client.setBufferSize(MQTT_BUFFER_SIZE)) {
+    Serial.println("Failed to allocate MQTT buffer");
+  }
 }
 
 // Non-blocking reconnect - returns true if connected, false if still trying
@@ -60,14 +69,16 @@ bool reconnect() {
 
   Serial.print("Attempting MQTT connection...");
 
-  // Connect with LWT (Last Will and Testament) for offline detection
-  // Use config values from WiFiManager
+  // Connect with LWT (Last Will and Testament) for offline detection.
+  // The client ID is the MAC-based device_id: it is unique per device, whereas
+  // the configurable device name defaults to "flaps-01" on every unit and
+  // identical IDs make the broker kick the other client in a loop.
   bool connected = false;
   if (strlen(cfg_mqtt_user) > 0) {
-    connected = client.connect(cfg_device_name, cfg_mqtt_user, cfg_mqtt_pass,
+    connected = client.connect(device_id, cfg_mqtt_user, cfg_mqtt_pass,
                                mqtt_status_topic, 0, true, "offline");
   } else {
-    connected = client.connect(cfg_device_name, NULL, NULL,
+    connected = client.connect(device_id, NULL, NULL,
                                mqtt_status_topic, 0, true, "offline");
   }
 
@@ -93,11 +104,43 @@ bool reconnect() {
   }
 }
 
-// Parse animation type from string
+// Animation names accepted in the MQTT "animation" field (case-insensitive)
+struct AnimationName {
+  const char* name;
+  AnimationType type;
+};
+
+static const AnimationName ANIMATION_NAMES[] = {
+  {"instant",      ANIM_INSTANT},
+  {"wave",         ANIM_WAVE},
+  {"scroll",       ANIM_SCROLL},
+  {"random",       ANIM_RANDOM},
+  {"slot_machine", ANIM_SLOT_MACHINE},
+  {"slot",         ANIM_SLOT_MACHINE},
+  {"scramble",     ANIM_SCRAMBLE},
+  {"center_out",   ANIM_CENTER_OUT},
+  {"center",       ANIM_CENTER_OUT},
+  {"typewriter",   ANIM_TYPEWRITER},
+  {"matrix",       ANIM_MATRIX},
+  {"countdown",    ANIM_COUNTDOWN},
+  {"cascade",      ANIM_CASCADE},
+  {"spin",         ANIM_SPIN},
+  {"glitch",       ANIM_GLITCH},
+  {"wipe",         ANIM_WIPE}
+};
+
+// Parse animation type from string (unknown names fall back to instant)
 AnimationType parseAnimation(const char* anim) {
-  if (strcmp(anim, "wave") == 0) return ANIM_WAVE;
-  if (strcmp(anim, "scroll") == 0) return ANIM_SCROLL;
-  if (strcmp(anim, "random") == 0) return ANIM_RANDOM;
+  if (anim != nullptr) {
+    for (const AnimationName& entry : ANIMATION_NAMES) {
+      if (strcasecmp(anim, entry.name) == 0) {
+        return entry.type;
+      }
+    }
+    Serial.print("Unknown animation '");
+    Serial.print(anim);
+    Serial.println("', using instant");
+  }
   return ANIM_INSTANT;
 }
 
@@ -117,114 +160,98 @@ bool enqueueMessage(const char* msg, AnimationType anim, uint8_t speed, uint32_t
   return true;
 }
 
-// Split text at word boundaries and enqueue display-sized chunks
+// Center-pad one chunk and put it into the queue
+static bool enqueueChunk(const char* chunk, size_t len,
+                         AnimationType anim, uint8_t speed, uint32_t delayMs) {
+  char displayText[number_units + 1];
+  centerPadMessage(chunk, (int)len, displayText);
+  return enqueueMessage(displayText, anim, speed, delayMs);
+}
+
+// Split text at word boundaries and enqueue display-sized chunks.
+// Chunks go straight into the queue (no large temporary arrays on the small
+// ESP8266 stack). Words longer than the display are split across chunks.
+// If the queue runs full, the queue is rolled back so the text is dropped
+// completely instead of being shown partially.
 bool enqueueTextChunks(const char* text,
                        AnimationType anim,
                        uint8_t speed,
                        uint32_t delayMs) {
 
-    const uint8_t chunkSize = 10;
+  const uint8_t savedTail = queueTail;
+  const uint8_t savedCount = queueCount;
 
-    char chunks[26][256];
-    uint8_t chunkCount = 0;
+  char current[number_units + 1];
+  size_t currentLength = 0;
+  uint8_t chunkCount = 0;
+  bool ok = true;
 
-    char currentChunk[256] = "";
-    size_t currentLength = 0;
+  const char* p = text;
 
-    const char* word = text;
+  while (ok && *p) {
 
-    while (*word) {
-
-        // Skip leading spaces
-        while (*word == ' ') {
-            word++;
-        }
-
-        if (*word == '\0') {
-            break;
-        }
-
-        // Find next word
-        const char* wordEnd = word;
-
-        while (*wordEnd != '\0' && *wordEnd != ' ') {
-            wordEnd++;
-        }
-
-        size_t wordLength = wordEnd - word;
-
-        // Calculate required space
-        size_t requiredLength = currentLength == 0
-                              ? wordLength
-                              : currentLength + 1 + wordLength;
-
-        // Start new chunk if word does not fit
-        if (currentLength > 0 && requiredLength > chunkSize) {
-
-            if (chunkCount >= 26) {
-                Serial.println("Too many text chunks");
-                return false;
-            }
-
-            strcpy(chunks[chunkCount++], currentChunk);
-
-            currentChunk[0] = '\0';
-            currentLength = 0;
-        }
-
-        // Add word to current chunk
-        if (currentLength > 0) {
-            currentChunk[currentLength++] = ' ';
-        }
-
-        memcpy(currentChunk + currentLength, word, wordLength);
-
-        currentLength += wordLength;
-        currentChunk[currentLength] = '\0';
-
-        word = wordEnd;
+    // Skip leading spaces
+    while (*p == ' ') {
+      p++;
+    }
+    if (*p == '\0') {
+      break;
     }
 
-    // Store last chunk
-    if (currentLength > 0) {
+    // Find end of word
+    const char* wordEnd = p;
+    while (*wordEnd != '\0' && *wordEnd != ' ') {
+      wordEnd++;
+    }
+    size_t wordLength = wordEnd - p;
 
-        if (chunkCount >= 26) {
-            Serial.println("Too many text chunks");
-            return false;
+    // Add the word piece by piece (pieces are at most one display wide)
+    while (ok && wordLength > 0) {
+      size_t piece = (wordLength > number_units) ? number_units : wordLength;
+
+      // Piece does not fit into the current chunk: flush it first
+      if (currentLength > 0 && currentLength + 1 + piece > number_units) {
+        ok = enqueueChunk(current, currentLength, anim, speed, delayMs);
+        if (ok) {
+          chunkCount++;
         }
+        currentLength = 0;
+        continue;
+      }
 
-        strcpy(chunks[chunkCount++], currentChunk);
+      if (currentLength > 0) {
+        current[currentLength++] = ' ';
+      }
+      memcpy(current + currentLength, p, piece);
+      currentLength += piece;
+
+      p += piece;
+      wordLength -= piece;
     }
+  }
 
-    // Check queue capacity before adding anything
-    if (chunkCount > MSG_QUEUE_SIZE - queueCount) {
-        Serial.println("Queue full - dropping complete text");
-        return false;
+  // Store last chunk
+  if (ok && currentLength > 0) {
+    ok = enqueueChunk(current, currentLength, anim, speed, delayMs);
+    if (ok) {
+      chunkCount++;
     }
+  }
 
-    // Enqueue all chunks
-    for (uint8_t i = 0; i < chunkCount; i++) {
+  if (!ok) {
+    queueTail = savedTail;
+    queueCount = savedCount;
+    Serial.println("Queue full - dropping complete text");
+    return false;
+  }
 
-        char displayText[number_units + 1];
+  messagesProcessed += chunkCount;
 
-        centerPadMessage(
-            chunks[i],
-            strlen(chunks[i]),
-            displayText
-        );
+  Serial.print("Text split into ");
+  Serial.print(chunkCount);
+  Serial.println(" word-based chunks");
 
-        if (!enqueueMessage(displayText, anim, speed, delayMs)) {
-            return false;
-        }
-
-        messagesProcessed++;
-    }
-
-    Serial.print("Text split into ");
-    Serial.print(chunkCount);
-    Serial.println(" word-based chunks");
-
-    return true;
+  return true;
 }
 
 // Get next message from queue
@@ -268,14 +295,10 @@ void callback(String topic, byte* message, unsigned int length) {
 
   // Null-terminate message for parsing
   char msgBuffer[256];
-  char textToQueue[256];
   int msgLen = (length < 255) ? length : 255;
   memcpy(msgBuffer, message, msgLen);
   msgBuffer[msgLen] = '\0';
   Serial.println(msgBuffer);
-
-  strncpy(textToQueue, msgBuffer, sizeof(textToQueue) - 1);
-  textToQueue[sizeof(textToQueue) - 1] = '\0';
 
   uint32_t delayMs = 1000;
 
@@ -407,28 +430,26 @@ void callback(String topic, byte* message, unsigned int length) {
 
       anim = parseAnimation(animStr);
 
-      msgLen = strlen(text);
-      
-      strncpy(textToQueue, text, sizeof(textToQueue) - 1);
-      textToQueue[sizeof(textToQueue) - 1] = '\0';
-
       Serial.print("JSON parsed - animation: ");
       Serial.print(animStr);
       Serial.print(", speed: ");
       Serial.println(speed);
 
-      // Split text into chunks and enqueue
-      enqueueTextChunks(textToQueue, anim, speed, delayMs);
-  
+      // Split text into chunks and enqueue (text points into doc, still valid)
+      enqueueTextChunks(text, anim, speed, delayMs);
+      return;
+    }
 
-    } 
-    
-    else {
-      // JSON parse failed, treat as plain text
-      Serial.println("JSON parse failed, treating as plain text");
-      } 
+    Serial.println("JSON parse failed, treating as plain text");
   }
 
+  // Plain text payload (also the legacy /game topic): strip trailing
+  // whitespace/newlines, then show it with the default animation.
+  while (msgLen > 0 && isspace((unsigned char)msgBuffer[msgLen - 1])) {
+    msgBuffer[--msgLen] = '\0';
+  }
+  Serial.println("Plain text message");
+  enqueueTextChunks(msgBuffer, anim, speed, delayMs);
 }
 
 void mqttLoopOps() {
@@ -491,7 +512,7 @@ void build_registration() {
 
 void checkIn() {
   unsigned long uptime = millis();
-  char registration[1024];
+  char registration[MQTT_BUFFER_SIZE];
   if (uptime - lastMillis > check_in_freq) {
     JsonDocument doc;
     deserializeJson(doc, reg);
@@ -500,7 +521,9 @@ void checkIn() {
     doc["queue_depth"] = queueCount;
     serializeJson(doc, registration);
     lastMillis = uptime;
-    client.publish(mqtt_registration_topic, registration);
+    if (!client.publish(mqtt_registration_topic, registration)) {
+      Serial.println("Registration publish failed (not connected or too large)");
+    }
   }
 }
 
