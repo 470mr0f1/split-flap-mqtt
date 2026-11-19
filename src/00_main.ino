@@ -36,9 +36,16 @@ void setup() {
   otaSetup();
   mqttSetup();
   webConfigSetup();
+
+  // Start LED connection test
+  startStartupLedTest();
 }
 
 void loop() {
+  
+  // Update startup LED test
+  updateStartupLedTest();
+
   // Feed watchdog
   ESP.wdtFeed();
 
