@@ -11,6 +11,14 @@
 #include <ESP8266WebServer.h>
 #include "declarations.h"
 
+// Startup LED test
+bool startupLedTestRunning = false;
+int startupLedTestUnit = 0;
+unsigned long startupLedTestLastStep = 0;
+
+const uint8_t STARTUP_LED_BRIGHTNESS = 128;
+const unsigned long STARTUP_LED_INTERVAL = 200; // 200 ms
+
 const uint8_t I2C_MAX_RETRIES = 3;
 const uint16_t I2C_TIMEOUT_MS = 100;
 
@@ -618,6 +626,70 @@ void writeLedToUnit(uint8_t address,
   Wire.beginTransmission(address);
   Wire.write(sendArray, sizeof(sendArray));
   Wire.endTransmission();
+}
+
+void startStartupLedTest() {
+
+    startupLedTestUnit = 0;
+    startupLedTestLastStep = millis();
+
+    startupLedTestRunning = (number_units > 0);
+
+    if (startupLedTestRunning) {
+
+        Serial.println("Starting startup LED test");
+
+        writeLedToUnit(
+            startupLedTestUnit,
+            STARTUP_LED_BRIGHTNESS,
+            0, 255, 0
+        );
+    }
+}
+
+void updateStartupLedTest() {
+
+    if (!startupLedTestRunning) {
+        return;
+    }
+
+    unsigned long currentMillis = millis();
+
+    if (currentMillis - startupLedTestLastStep < STARTUP_LED_INTERVAL) {
+        return;
+    }
+
+    // Switch off current unit
+    writeLedToUnit(
+        startupLedTestUnit,
+        0,
+        0, 0, 0
+    );
+
+    // Next unit
+    startupLedTestUnit++;
+
+    // Check if all units have been tested
+    if (startupLedTestUnit > number_units) {
+
+        startupLedTestRunning = false;
+
+        Serial.println("Startup LED test completed");
+
+        return;
+    }
+
+    // Switch next unit green
+    writeLedToUnit(
+        startupLedTestUnit,
+        STARTUP_LED_BRIGHTNESS,
+        0, 255, 0
+    );
+
+    startupLedTestLastStep = currentMillis;
+
+    Serial.print("Startup LED test - Unit: ");
+    Serial.println(startupLedTestUnit);
 }
 
 //checks if unit in display is currently moving
