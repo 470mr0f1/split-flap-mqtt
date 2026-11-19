@@ -31,6 +31,14 @@ extern char writtenLast[];
 extern int displayState[];
 extern const uint8_t answersize;
 
+// Startup LED test
+extern bool startupLedTestRunning;
+extern int startupLedTestUnit;
+extern unsigned long startupLedTestLastStep;
+
+extern const uint8_t STARTUP_LED_BRIGHTNESS;
+extern const unsigned long STARTUP_LED_INTERVAL;
+
 // WiFiManager config variables (defined in 02_wifi.ino)
 extern char cfg_mqtt_server[64];
 extern char cfg_mqtt_port[6];
@@ -76,6 +84,10 @@ struct QueueEntry {
   uint8_t speed;
   uint32_t delayMs;
 };
+
+// Startup LED test functions
+void startStartupLedTest();
+void updateStartupLedTest();
 
 // Function declarations - Config
 void buildDeviceId();
