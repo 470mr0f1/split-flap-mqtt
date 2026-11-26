@@ -37,7 +37,9 @@ const uint8_t answersize = 1; //Size of units request answer
 const int flapamount = 45; //Amount of Flaps in each unit
 const int minspeed = 1; //min Speed
 const int maxspeed = 12; //max Speed
-const char letters[] = {' ', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', '$', '&', '#', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', ':', '.', '-', '?', '!'};
+// Umlauts use single-byte internal codes (0x80..0x82). MQTT UTF-8 is
+// converted to these codes before text is split into display characters.
+const char letters[] = {' ', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', '\x80', '\x81', '\x82', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', ':', '.', '-', '?', '!'};
 char writtenLast[number_units+1] = "";
 const int flap_speed = 10;
 

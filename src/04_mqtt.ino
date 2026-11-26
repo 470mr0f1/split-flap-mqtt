@@ -144,6 +144,49 @@ AnimationType parseAnimation(const char* anim) {
   return ANIM_INSTANT;
 }
 
+// Convert UTF-8 text into the display's one-byte character set. This must
+// happen before chunking: each umlaut then occupies exactly one flap position.
+// Supported: Ä/ä -> 0x80, Ö/ö -> 0x81, Ü/ü -> 0x82.
+static size_t normalizeUtf8Text(const char* input, char* output, size_t outputSize) {
+  size_t inPos = 0;
+  size_t outPos = 0;
+
+  if (outputSize == 0) return 0;
+
+  while (input[inPos] != '\0' && outPos + 1 < outputSize) {
+    const uint8_t first = (uint8_t)input[inPos];
+    if (first == 0xC3 && input[inPos + 1] != '\0') {
+      const uint8_t second = (uint8_t)input[inPos + 1];
+      char mapped = '?';
+      bool supported = true;
+      switch (second) {
+        case 0x84: case 0xA4: mapped = (char)0x80; break; // Ä ä
+        case 0x96: case 0xB6: mapped = (char)0x81; break; // Ö ö
+        case 0x9C: case 0xBC: mapped = (char)0x82; break; // Ü ü
+        default: supported = false; break;
+      }
+      if (supported) {
+        output[outPos++] = mapped;
+        inPos += 2;
+        continue;
+      }
+    }
+
+    // Preserve ASCII. Replace unsupported multi-byte UTF-8 characters with '?'.
+    if (first < 0x80) {
+      output[outPos++] = (char)first;
+      inPos++;
+    } else {
+      output[outPos++] = '?';
+      inPos++;
+      while (((uint8_t)input[inPos] & 0xC0) == 0x80) inPos++;
+    }
+  }
+
+  output[outPos] = '\0';
+  return outPos;
+}
+
 // Add message to queue with animation
 bool enqueueMessage(const char* msg, AnimationType anim, uint8_t speed, uint32_t delayMs) {
   if (queueCount >= MSG_QUEUE_SIZE) {
@@ -435,8 +478,10 @@ void callback(String topic, byte* message, unsigned int length) {
       Serial.print(", speed: ");
       Serial.println(speed);
 
-      // Split text into chunks and enqueue (text points into doc, still valid)
-      enqueueTextChunks(text, anim, speed, delayMs);
+      // Convert UTF-8 to one-byte display characters before word-based chunking.
+      char normalizedText[256];
+      normalizeUtf8Text(text, normalizedText, sizeof(normalizedText));
+      enqueueTextChunks(normalizedText, anim, speed, delayMs);
       return;
     }
 
@@ -449,7 +494,9 @@ void callback(String topic, byte* message, unsigned int length) {
     msgBuffer[--msgLen] = '\0';
   }
   Serial.println("Plain text message");
-  enqueueTextChunks(msgBuffer, anim, speed, delayMs);
+  char normalizedText[256];
+  normalizeUtf8Text(msgBuffer, normalizedText, sizeof(normalizedText));
+  enqueueTextChunks(normalizedText, anim, speed, delayMs);
 }
 
 void mqttLoopOps() {

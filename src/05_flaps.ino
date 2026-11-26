@@ -25,6 +25,15 @@ const uint16_t I2C_TIMEOUT_MS = 100;
 // Track I2C errors per unit for health metrics.
 uint16_t i2cErrors[MAX_NUMBER_UNITS] = {0};
 
+// Uppercase ASCII letters without applying locale-dependent ctype functions
+// to the internal umlaut codes (0x80..0x82).
+static char toDisplayUpper(char character) {
+  if (character >= 'a' && character <= 'z') {
+    return character - ('a' - 'A');
+  }
+  return character;
+}
+
 //checks for new message to show (legacy, instant animation)
 void showNewData(char message[number_units+1]) {
   if (strcmp(writtenLast, message) != 0) {
@@ -50,7 +59,7 @@ void showMessage(char message[number_units+1], int flapSpeed) {
   waitForDisplayIdle();
   Serial.println("start to send (instant)");
   for (int i = 0; i < number_units; i++) {
-    char currentLetter = toupper(message[i]);
+    char currentLetter = toDisplayUpper(message[i]);
     int currentLetterPosition = translateLettertoInt(currentLetter);
     writeToUnit(i, currentLetterPosition, flapSpeed);
   }
@@ -154,7 +163,7 @@ uint8_t getRandomFlapPosition(uint8_t excludedPosition) {
 
 // Convert message character to flap position
 uint8_t getMessagePosition(char character) {
-  return translateLettertoInt(toupper(character));
+  return translateLettertoInt(toDisplayUpper(character));
 }
 
 // Wait for display to be idle with timeout
@@ -175,7 +184,7 @@ void waitForDisplayIdle() {
 void showWaveAnimation(char message[number_units+1], int flapSpeed) {
   Serial.println("start to send (wave)");
   for (int i = 0; i < number_units; i++) {
-    char currentLetter = toupper(message[i]);
+    char currentLetter = toDisplayUpper(message[i]);
     int currentLetterPosition = translateLettertoInt(currentLetter);
     writeToUnit(i, currentLetterPosition, flapSpeed);
     delay(100);  // Delay between each unit for wave effect
@@ -205,7 +214,7 @@ void showScrollAnimation(char message[number_units+1], int flapSpeed) {
 
     // Update display
     for (int i = 0; i < number_units; i++) {
-      char currentLetter = toupper(tempMsg[i]);
+      char currentLetter = toDisplayUpper(tempMsg[i]);
       int currentLetterPosition = translateLettertoInt(currentLetter);
       writeToUnit(i, currentLetterPosition, flapSpeed);
     }
@@ -250,7 +259,7 @@ void showRandomAnimation(char message[number_units+1], int flapSpeed) {
     }
 
     if (unitIdx >= 0) {
-      char currentLetter = toupper(message[unitIdx]);
+      char currentLetter = toDisplayUpper(message[unitIdx]);
       int currentLetterPosition = translateLettertoInt(currentLetter);
       writeToUnit(unitIdx, currentLetterPosition, flapSpeed);
       revealed[unitIdx] = true;
