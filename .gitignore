@@ -14,3 +14,5 @@ mosquitto/log/
 
 # Secrets (if any)
 secrets.h
+
+mosquito.txt
