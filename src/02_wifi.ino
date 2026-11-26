@@ -20,7 +20,7 @@ const char* CONFIG_FILE = "/config.json";
 char cfg_mqtt_server[64] = "";
 char cfg_mqtt_port[6] = "1883";
 char cfg_mqtt_user[32] = "";
-char cfg_mqtt_pass[32] = "";
+char cfg_mqtt_pass[128] = "";
 char cfg_device_name[32] = "flaps-01";
 
 // Flag for saving config
@@ -129,7 +129,7 @@ void connectToWifi() {
   WiFiManagerParameter custom_mqtt_server("mqtt_server", "MQTT Server", cfg_mqtt_server, 64);
   WiFiManagerParameter custom_mqtt_port("mqtt_port", "MQTT Port", cfg_mqtt_port, 6);
   WiFiManagerParameter custom_mqtt_user("mqtt_user", "MQTT User (optional)", cfg_mqtt_user, 32);
-  WiFiManagerParameter custom_mqtt_pass("mqtt_pass", "MQTT Password (optional)", cfg_mqtt_pass, 32);
+  WiFiManagerParameter custom_mqtt_pass("mqtt_pass", "MQTT Password (optional)", cfg_mqtt_pass, 128);
   WiFiManagerParameter custom_device_name("device_name", "Device Name", cfg_device_name, 32);
 
   // Add custom parameters

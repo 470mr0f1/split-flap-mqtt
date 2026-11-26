@@ -43,7 +43,7 @@ extern const unsigned long STARTUP_LED_INTERVAL;
 extern char cfg_mqtt_server[64];
 extern char cfg_mqtt_port[6];
 extern char cfg_mqtt_user[32];
-extern char cfg_mqtt_pass[32];
+extern char cfg_mqtt_pass[128];
 extern char cfg_device_name[32];
 
 // Global variables for network (defined in 01_config.ino)
